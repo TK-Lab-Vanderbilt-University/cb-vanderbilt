@@ -1,23 +1,24 @@
-CompactSeurat = function(seurat_obj) {
-  DefaultAssay(seurat_obj) <- "RNA"
+CompactSeurat <- function(seurat_obj) {
+  # Load library within function to be safe
+  if (!requireNamespace("Seurat", quietly = TRUE)) stop("Seurat package is required.")
+  
+  Seurat::DefaultAssay(seurat_obj) <- "RNA"
+  
+  # Join layers if it's Seurat v5
   if (inherits(seurat_obj[["RNA"]], "Assay5")) {
-    seurat_obj = JoinLayers(seurat_obj)
+    seurat_obj <- Seurat::JoinLayers(seurat_obj)
   }
-
-  seurat_obj = DietSeurat(
+  
+  # DietSeurat to keep only necessary data
+  seurat_obj <- Seurat::DietSeurat(
     object = seurat_obj,
     assays = "RNA",
     layers = c("counts", "data"),
     dimreducs = c("pca", "harmony", "umap")
   )
-
-  if (is(seurat_obj[["RNA"]]$counts, "matrix")) {
-    seurat_obj[["RNA"]]$counts <- as(seurat_obj[["RNA"]]$counts, "dgCMatrix")
-  }
-  if (is(seurat_obj[["RNA"]]$data, "matrix")) {
-    seurat_obj[["RNA"]]$data <- as(seurat_obj[["RNA"]]$data, "dgCMatrix")
-  }
-
-  seurat_obj = NormalizeData(seurat_obj)
+  
+  # Final normalization
+  seurat_obj <- Seurat::NormalizeData(seurat_obj)
+  
   return(seurat_obj)
 }
