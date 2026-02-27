@@ -18,7 +18,7 @@ RunMAST <- function(seurat_obj,
   
   cat("[1] Merging Seurat layers and extracting compact dgCMatrix...\n")
   flush.console()
-  seurat_obj <- Seurat::JoinLayers(seurat_obj)
+  seurat_obj <- SeuratObject::JoinLayers(seurat_obj)
   expr <- as(Seurat::GetAssayData(seurat_obj, assay="RNA", layer="data"), "dgCMatrix")
   meta <- seurat_obj@meta.data
   
@@ -118,4 +118,5 @@ RunMAST <- function(seurat_obj,
   end_time <- Sys.time()
   cat("\n[Done] Total processing time:", format(end_time - start_time), "\n")
   return(sc.DE.all)
+
 }
