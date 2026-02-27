@@ -1,2 +1,7 @@
 export(CompactSeurat)
+export(RunMAST)
+import(SeuratObject)
 import(Seurat)
+import(MAST)
+import(BiocParallel)
+import(dplyr)
