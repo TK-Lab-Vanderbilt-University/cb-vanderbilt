@@ -1,14 +1,3 @@
-#' Compact Seurat Object by Removing Unnecessary Data and Coercing to Sparse Matrix
-#'
-#' @param seurat_obj A Seurat object.
-#'
-#' @return A compacted Seurat object with normalized RNA assay.
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' obj <- CompactSeurat(seurat_obj)
-#' }
 CompactSeurat = function(seurat_obj) {
   DefaultAssay(seurat_obj) <- "RNA"
   if (inherits(seurat_obj[["RNA"]], "Assay5")) {
