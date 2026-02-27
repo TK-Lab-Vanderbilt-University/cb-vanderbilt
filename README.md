@@ -13,7 +13,7 @@ This repository serves as a centralized hub for high-performance utility modules
 ## 🚀 Key Engineering Pillars
 
 - **High-Throughput Scalability**: Engineered to handle massive multi-omics datasets by optimizing memory occupancy and CPU/GPU utilization.
-- **Cross-Platform Integration**: Supports seamless transitions between R (Seurat/Bioconductor) and Python (Scanpy/AnnData) environments.
+- **Cross-Platform Integration**: Supports seamless transitions between R and Python (GPU based) environments.
 - **Data Lightweighting**: Advanced object compression and sparse matrix coercion algorithms to minimize storage overhead without loss of biological signal.
 - **Modular Pipeline Design**: Decoupled function architectures that allow for rapid prototyping and deployment of novel analytical methods.
 
