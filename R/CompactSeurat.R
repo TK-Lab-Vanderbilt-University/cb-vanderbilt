@@ -12,7 +12,7 @@
 CompactSeurat = function(seurat_obj) {
   DefaultAssay(seurat_obj) <- "RNA"
   if (inherits(seurat_obj[["RNA"]], "Assay5")) {
-    seurat_obj = JoinLayers(seurat_obj)
+    seurat_obj = SeuratObject::JoinLayers(seurat_obj)
   }
 
   seurat_obj = DietSeurat(
