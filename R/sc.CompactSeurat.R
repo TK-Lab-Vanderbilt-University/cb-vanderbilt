@@ -7,7 +7,7 @@
 #'
 #' @examples
 #' \dontrun{
-#' obj <- CompactSeurat(seurat_obj)
+#' obj <- sc.CompactSeurat(seurat_obj)
 #' }
 CompactSeurat = function(seurat_obj) {
   DefaultAssay(seurat_obj) <- "RNA"
