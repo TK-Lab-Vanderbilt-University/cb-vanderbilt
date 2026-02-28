@@ -9,7 +9,7 @@
 #' \dontrun{
 #' obj <- sc.CompactSeurat(seurat_obj)
 #' }
-CompactSeurat = function(seurat_obj) {
+sc.CompactSeurat = function(seurat_obj) {
   DefaultAssay(seurat_obj) <- "RNA"
   if (inherits(seurat_obj[["RNA"]], "Assay5")) {
     seurat_obj = SeuratObject::JoinLayers(seurat_obj)
