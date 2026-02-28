@@ -1,7 +1,14 @@
-export(CompactSeurat)
+export(sc.CompactSeurat)
+export(sc.linux.RunMAST)
+export(sc.windows.RunMAST)
+
+export(CompactSeurat) 
 export(RunMAST)
+
 import(SeuratObject)
 import(Seurat)
 import(MAST)
 import(BiocParallel)
 import(dplyr)
+import(SingleCellExperiment)
+import(SummarizedExperiment)
