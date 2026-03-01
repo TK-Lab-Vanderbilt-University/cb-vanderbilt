@@ -4,6 +4,7 @@ export(sc.linux.RunMAST)
 export(sc.windows.RunMAST)
 export(sc.RunWilcox)
 export(sc.pseudobulk.DE)
+export(sc.celltype.cor)
 
 # --- Primary Frameworks ---
 import(Seurat)
