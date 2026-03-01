@@ -1,12 +1,37 @@
+# --- Functions Export ---
 export(sc.CompactSeurat)
 export(sc.linux.RunMAST)
 export(sc.windows.RunMAST)
 export(sc.RunWilcox)
+export(sc.pseudobulk.DE)
 
+# --- Primary Frameworks ---
 import(Seurat)
 import(SeuratObject)
 import(MAST)
-import(BiocParallel)
-import(dplyr)
+import(edgeR)
+
+# --- Data Structures & Management ---
 import(SingleCellExperiment)
-importFrom(SummarizedExperiment, Assays)
+import(SummarizedExperiment)
+import(Matrix)
+import(Matrix.utils)
+
+# --- Parallel Computing ---
+import(BiocParallel)
+import(future)
+import(parallel)
+
+# --- Data Manipulation & Utilities ---
+import(dplyr)
+import(tibble)
+import(magrittr)
+import(stringr)
+import(purrr)
+
+# --- Specific Function Imports (Optional but Recommended) ---
+importFrom(SummarizedExperiment, assays)
+importFrom(SummarizedExperiment, colData)
+importFrom(SummarizedExperiment, rowData)
+importFrom(tibble, rownames_to_column)
+importFrom(stats, as.formula, p.adjust, model.matrix, wilcox.test)
