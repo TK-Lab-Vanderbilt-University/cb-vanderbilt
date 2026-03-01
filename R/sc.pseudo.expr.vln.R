@@ -1,25 +1,35 @@
-#' @title Flexible Pseudo-bulk Gene Expression Visualization
+#' @title Comprehensive Pseudo-bulk Gene Expression Analyzer & Plotter
 #'
 #' @description
-#' This function visualizes gene expression using pseudo-bulk aggregation. 
-#' It allows for "Global" analysis (all cells) or "Side-by-side" comparison of 
-#' multiple specific cell types using facets.
+#' This function provides a robust pipeline for visualizing single-cell RNA-seq data 
+#' using pseudo-bulk aggregation at the sample (patient) level. By treating patients 
+#' as biological replicates, it resolves the false-positive p-value inflation common 
+#' in cell-level differential expression analyses. 
+#' 
+#' Key Capabilities:
+#' 1. Flexible Filtering: Analyze the global landscape ("all" cells) or compare specific 
+#'    lineages side-by-side using facets (e.g., celltypes = c("Progenitor", "Monocyte")).
+#' 2. Multiple Normalizations: Choose between 'Average RNA Expression' (raw counts scaled 
+#'    by cell number), 'log2(CPM + 1)', or Seurat's default 'Log Normalization'. 
+#'    Use method = "all" to visualize all three side-by-side.
+#' 3. Advanced Statistics: Seamlessly compute significance between specific pairs 
+#'    (or all pairs) using T-test, Wilcoxon, ANOVA, etc.
+#' 4. Publication Ready: Customizable colors, dynamic legend control, and Nature-style layouts.
 #'
 #' @param seurat_obj A Seurat object.
-#' @param target_gene String. Gene name.
-#' @param group_var String. Grouping variable (default: "condition").
-#' @param sample_var String. Sample/Patient ID variable (default: "orig.ident").
-#' @param celltype_var String. Cell type annotation variable (default: "detailed.celltypes").
-#' @param celltypes String or vector. Use "all" for global aggregation, 
-#' or a vector of cell types (e.g., c("Progenitor", "GMP")) for specific analysis.
+#' @param target_gene String. Gene name to analyze.
+#' @param group_var String. Metadata column for groups (default: "condition").
+#' @param sample_var String. Metadata column for sample IDs (default: "orig.ident").
+#' @param celltype_var String. Metadata column for cell types (default: "detailed.celltypes").
+#' @param celltypes String or vector. "all" for global analysis, or a vector of specific cell types.
 #' @param method Normalization: "all", "log.cpm" (default), "log.norm", or "raw.expression".
-#' @param comparisons String or list. Use "all" for all pairwise comparisons, or a list of pairs (e.g., list(c("MDS", "sAML"))).
+#' @param comparisons String or list. "all" for comprehensive pairwise stats, or specific pairs.
 #' @param stats_method Statistical test (default: "t.test").
 #' @param stats_label P-value format: "p.signif" or "p.format".
 #' @param color_pal Custom color palette for groups.
-#' @param show_legend Logical. Whether to display the legend (default: FALSE).
+#' @param show_legend Logical. Toggle legend display (default: FALSE).
 #' 
-#' @return A ggplot2 object or a patchwork object if multiple methods are selected.
+#' @return A ggplot2 object, or a patchwork object if method = "all".
 #' @author Hyundong Yoon
 #' @export
 sc.pseudo.expr.vln <- function(seurat_obj,
@@ -33,7 +43,7 @@ sc.pseudo.expr.vln <- function(seurat_obj,
                                stats_method = c("t.test", "wilcox.test", "anova", "kruskal.test"),
                                stats_label = c("p.signif", "p.format"),
                                color_pal = NULL,
-                               show_legend = FALSE) { # Legend toggle added
+                               show_legend = FALSE) {
   
   require(dplyr)
   require(ggplot2)
@@ -42,7 +52,7 @@ sc.pseudo.expr.vln <- function(seurat_obj,
   require(patchwork)
 
   # Parameter handling
-  if (length(method) > 1) method <- method[1] # Default if not explicitly provided
+  if (length(method) > 1) method <- method[1] 
   stats_method <- match.arg(stats_method)
   stats_label <- match.arg(stats_label)
 
@@ -67,9 +77,9 @@ sc.pseudo.expr.vln <- function(seurat_obj,
     celltype = meta_data[valid_cells, celltype_var],
     counts = as.numeric(GetAssayData(seurat_obj, layer = "counts")[target_gene, valid_cells]),
     total_umi = seurat_obj$nCount_RNA[valid_cells]
-  ) %>% filter(!is.na(group)) # Ensure no NA groups
+  ) %>% filter(!is.na(group))
 
-  # 3. Pseudo-bulk Aggregation
+  # 3. Pseudo-bulk Aggregation (Adding cell count tracking for raw averages)
   grouping_cols <- if(split_mode) c("sample", "group", "celltype") else c("sample", "group")
   
   pb_df <- df %>%
@@ -77,17 +87,17 @@ sc.pseudo.expr.vln <- function(seurat_obj,
     summarise(
       pb_gene_counts = sum(counts),
       pb_total_umi = sum(total_umi),
+      n_cells = n(), # Track number of cells to calculate average expression
       .groups = "drop"
     )
 
   # 4. Handle Comparisons ("all" logic)
   if (!is.null(comparisons) && length(comparisons) == 1 && comparisons == "all") {
-    # Generate all pairwise combinations of the groups
     group_levels <- as.character(unique(pb_df$group))
     if (length(group_levels) > 1) {
       comparisons <- combn(group_levels, 2, simplify = FALSE)
     } else {
-      comparisons <- NULL # Cannot compare if only 1 group exists
+      comparisons <- NULL 
     }
   }
 
@@ -95,14 +105,17 @@ sc.pseudo.expr.vln <- function(seurat_obj,
   generate_plot <- function(data, method_type) {
     
     if (method_type == "raw.expression") {
-      data$Expression <- data$pb_gene_counts
-      y_lab <- "Raw Counts"
+      # [Updated] Average expression per cell instead of massive sum
+      data$Expression <- data$pb_gene_counts / data$n_cells
+      y_lab <- "Average RNA Expression"
+      
     } else if (method_type == "log.cpm") {
       data$Expression <- log2((data$pb_gene_counts / data$pb_total_umi) * 1e6 + 1)
       y_lab <- expression(bold(log[2] * (CPM + 1)))
+      
     } else if (method_type == "log.norm") {
       data$Expression <- log1p((data$pb_gene_counts / data$pb_total_umi) * 10000)
-      y_lab <- "ln(CP10k + 1)"
+      y_lab <- "Log Normalization" # [Updated] Simplified label
     }
 
     p <- ggplot(data, aes(x = group, y = Expression, fill = group)) +
@@ -124,7 +137,6 @@ sc.pseudo.expr.vln <- function(seurat_obj,
       p <- p + stat_compare_means(comparisons = comparisons, method = stats_method, label = stats_label)
     }
     
-    # Legend Control Logic
     if (!show_legend) {
       p <- p + theme(legend.position = "none")
     }
@@ -138,18 +150,14 @@ sc.pseudo.expr.vln <- function(seurat_obj,
     p_cpm <- generate_plot(pb_df, "log.cpm")
     p_norm <- generate_plot(pb_df, "log.norm")
     
-    # Return patchwork combined plot
     combined_plot <- p_raw | p_cpm | p_norm
     
-    # If showing legend for 'all' methods, collect it to the right side
     if (show_legend) {
       combined_plot <- combined_plot + plot_layout(guides = "collect")
     }
     
     return(combined_plot)
-    
   } else {
-    # Return single plot
     return(generate_plot(pb_df, method))
   }
 }
