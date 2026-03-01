@@ -1,20 +1,23 @@
 #' @title Comprehensive Pseudo-bulk Gene Expression Analyzer & Plotter
 #'
 #' @description
-#' This function provides a robust pipeline for visualizing single-cell RNA-seq data 
-#' using pseudo-bulk aggregation at the sample (patient) level. By treating patients 
-#' as biological replicates, it resolves the false-positive p-value inflation common 
-#' in cell-level differential expression analyses. 
+#' This function provides a robust, end-to-end pipeline for visualizing single-cell 
+#' RNA-seq data using pseudo-bulk aggregation at the sample (patient) level. 
+#' Treating patients as biological replicates resolves the false-positive p-value 
+#' inflation commonly seen in single-cell differential expression analyses.
 #' 
-#' Key Capabilities:
-#' 1. Flexible Filtering: Analyze the global landscape ("all" cells) or compare specific 
-#'    lineages side-by-side using facets (e.g., celltypes = c("Progenitor", "Monocyte")).
-#' 2. Multiple Normalizations: Choose between 'Average RNA Expression' (raw counts scaled 
-#'    by cell number), 'log2(CPM + 1)', or Seurat's default 'Log Normalization'. 
-#'    Use method = "all" to visualize all three side-by-side.
-#' 3. Advanced Statistics: Seamlessly compute significance between specific pairs 
-#'    (or all pairs) using T-test, Wilcoxon, ANOVA, etc.
-#' 4. Publication Ready: Customizable colors, dynamic legend control, and Nature-style layouts.
+#' Key Features:
+#' 1. Flexible Cell-Type Filtering: Analyze the global landscape ("all" cells) or 
+#'    compare specific cell lineages side-by-side using faceting.
+#' 2. Multiple Normalizations: Choose between 'Average RNA Expression' (raw counts 
+#'    scaled by cell number), 'log2(CPM + 1)', or Seurat's 'Log Normalization'. 
+#'    Set method = "all" to visualize all three side-by-side.
+#' 3. Enhanced Visualization: Features Nature-style aesthetics, including customized 
+#'    colors, individual patient jitter points, and a prominent median line with 
+#'    clean margins inside each violin plot.
+#' 4. Advanced Statistics: Seamlessly compute significance between any specific 
+#'    pairs (or all combinations) using T-test, Wilcoxon, ANOVA, or Kruskal-Wallis.
+#' 5. Publication Ready: Dynamic legend control and optimized layout formatting.
 #'
 #' @param seurat_obj A Seurat object.
 #' @param target_gene String. Gene name to analyze.
@@ -27,6 +30,7 @@
 #' @param stats_method Statistical test (default: "t.test").
 #' @param stats_label P-value format: "p.signif" or "p.format".
 #' @param color_pal Custom color palette for groups.
+#' @param dot_color String. Fill color for jitter points (default: "white").
 #' @param show_legend Logical. Toggle legend display (default: FALSE).
 #' 
 #' @return A ggplot2 object, or a patchwork object if method = "all".
@@ -43,6 +47,7 @@ sc.pseudo.expr.vln <- function(seurat_obj,
                                stats_method = c("t.test", "wilcox.test", "anova", "kruskal.test"),
                                stats_label = c("p.signif", "p.format"),
                                color_pal = NULL,
+                               dot_color = "white",
                                show_legend = FALSE) {
   
   require(dplyr)
@@ -79,7 +84,7 @@ sc.pseudo.expr.vln <- function(seurat_obj,
     total_umi = seurat_obj$nCount_RNA[valid_cells]
   ) %>% filter(!is.na(group))
 
-  # 3. Pseudo-bulk Aggregation (Adding cell count tracking for raw averages)
+  # 3. Pseudo-bulk Aggregation
   grouping_cols <- if(split_mode) c("sample", "group", "celltype") else c("sample", "group")
   
   pb_df <- df %>%
@@ -87,7 +92,7 @@ sc.pseudo.expr.vln <- function(seurat_obj,
     summarise(
       pb_gene_counts = sum(counts),
       pb_total_umi = sum(total_umi),
-      n_cells = n(), # Track number of cells to calculate average expression
+      n_cells = n(), 
       .groups = "drop"
     )
 
@@ -105,22 +110,26 @@ sc.pseudo.expr.vln <- function(seurat_obj,
   generate_plot <- function(data, method_type) {
     
     if (method_type == "raw.expression") {
-      # [Updated] Average expression per cell instead of massive sum
       data$Expression <- data$pb_gene_counts / data$n_cells
       y_lab <- "Average RNA Expression"
-      
     } else if (method_type == "log.cpm") {
       data$Expression <- log2((data$pb_gene_counts / data$pb_total_umi) * 1e6 + 1)
       y_lab <- expression(bold(log[2] * (CPM + 1)))
-      
     } else if (method_type == "log.norm") {
       data$Expression <- log1p((data$pb_gene_counts / data$pb_total_umi) * 10000)
-      y_lab <- "Log Normalization" # [Updated] Simplified label
+      y_lab <- "Log Normalization" 
     }
 
     p <- ggplot(data, aes(x = group, y = Expression, fill = group)) +
       geom_violin(trim = TRUE, scale = "width", alpha = 0.7, color = "black") +
-      geom_jitter(width = 0.1, size = 2, shape = 21, fill = "white", color = "black") +
+      
+      # [Updated] Jitter Point with custom fill color
+      geom_jitter(width = 0.1, size = 2, shape = 21, fill = dot_color, color = "black") +
+      
+      # Median Line
+      stat_summary(fun = median, fun.min = median, fun.max = median, 
+                   geom = "crossbar", width = 0.4, color = "black", linewidth = 0.8) +
+                   
       theme_classic() +
       labs(title = paste0(target_gene, " (", method_type, ")"), y = y_lab, x = "") +
       theme(plot.title = element_text(face="bold", hjust=0.5, size=13),
