@@ -1,8 +1,7 @@
 export(sc.CompactSeurat)
 export(sc.linux.RunMAST)
-export(sc.linux.RunWilcox)
 export(sc.windows.RunMAST)
-export(sc.windows.RunWilcox)
+export(sc.RunWilcox)
 
 import(Seurat)
 import(SeuratObject)
