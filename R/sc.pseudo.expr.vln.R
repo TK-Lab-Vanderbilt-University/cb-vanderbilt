@@ -17,6 +17,7 @@
 #' @param stats_method Statistical test (default: "t.test").
 #' @param stats_label P-value format: "p.signif" or "p.format".
 #' @param color_pal Custom color palette for groups.
+#' @param show_legend Logical. Whether to display the legend (default: FALSE).
 #' 
 #' @return A ggplot2 object or a patchwork object if multiple methods are selected.
 #' @author Hyundong Yoon
@@ -31,7 +32,8 @@ sc.pseudo.expr.vln <- function(seurat_obj,
                                comparisons = NULL,
                                stats_method = c("t.test", "wilcox.test", "anova", "kruskal.test"),
                                stats_label = c("p.signif", "p.format"),
-                               color_pal = NULL) {
+                               color_pal = NULL,
+                               show_legend = FALSE) { # Legend toggle added
   
   require(dplyr)
   require(ggplot2)
@@ -121,6 +123,12 @@ sc.pseudo.expr.vln <- function(seurat_obj,
     if (!is.null(comparisons)) {
       p <- p + stat_compare_means(comparisons = comparisons, method = stats_method, label = stats_label)
     }
+    
+    # Legend Control Logic
+    if (!show_legend) {
+      p <- p + theme(legend.position = "none")
+    }
+    
     return(p)
   }
 
@@ -131,7 +139,15 @@ sc.pseudo.expr.vln <- function(seurat_obj,
     p_norm <- generate_plot(pb_df, "log.norm")
     
     # Return patchwork combined plot
-    return(p_raw | p_cpm | p_norm)
+    combined_plot <- p_raw | p_cpm | p_norm
+    
+    # If showing legend for 'all' methods, collect it to the right side
+    if (show_legend) {
+      combined_plot <- combined_plot + plot_layout(guides = "collect")
+    }
+    
+    return(combined_plot)
+    
   } else {
     # Return single plot
     return(generate_plot(pb_df, method))
