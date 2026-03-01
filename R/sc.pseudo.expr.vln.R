@@ -20,7 +20,7 @@
 #' 5. Publication Ready: Dynamic legend control and optimized layout formatting.
 #'
 #' @param seurat_obj A Seurat object.
-#' @param target_gene String. Gene name to analyze.
+#' @param target_gene String or vector. Gene name(s) to analyze.
 #' @param group_var String. Metadata column for groups (default: "condition").
 #' @param sample_var String. Metadata column for sample IDs (default: "orig.ident").
 #' @param celltype_var String. Metadata column for cell types (default: "detailed.celltypes").
@@ -51,6 +51,7 @@ sc.pseudo.expr.vln <- function(seurat_obj,
                                show_legend = FALSE) {
   
   require(dplyr)
+  require(tidyr)
   require(ggplot2)
   require(ggpubr)
   require(Seurat)
@@ -61,31 +62,43 @@ sc.pseudo.expr.vln <- function(seurat_obj,
   stats_method <- match.arg(stats_method)
   stats_label <- match.arg(stats_label)
 
-  if (!target_gene %in% rownames(seurat_obj)) stop("Gene not found in Seurat object.")
+  # Check if all target genes exist
+  missing_genes <- target_gene[!target_gene %in% rownames(seurat_obj)]
+  if (length(missing_genes) > 0) {
+    stop(paste0("Genes not found in object: ", paste(missing_genes, collapse = ", ")))
+  }
 
   # 1. Prepare Data & Logic for Cell Types
   meta_data <- seurat_obj@meta.data
   
   if (length(celltypes) == 1 && celltypes == "all") {
     valid_cells <- rownames(meta_data)
-    split_mode <- FALSE
+    split_mode_cell <- FALSE
   } else {
     valid_cells <- rownames(meta_data[meta_data[[celltype_var]] %in% celltypes, ])
     if (length(valid_cells) == 0) stop("No matching cell types found in the object.")
-    split_mode <- TRUE 
+    split_mode_cell <- TRUE 
   }
 
-  # 2. Extract Counts
-  df <- data.frame(
-    sample = meta_data[valid_cells, sample_var],
-    group = meta_data[valid_cells, group_var],
-    celltype = meta_data[valid_cells, celltype_var],
-    counts = as.numeric(GetAssayData(seurat_obj, layer = "counts")[target_gene, valid_cells]),
-    total_umi = seurat_obj$nCount_RNA[valid_cells]
-  ) %>% filter(!is.na(group))
+  # 2. Extract Counts for multiple genes
+  raw_counts <- GetAssayData(seurat_obj, layer = "counts", assay = "RNA")[target_gene, valid_cells, drop = FALSE]
+  
+  # Reshape data to long format
+  df_list <- lapply(target_gene, function(g) {
+    data.frame(
+      sample = meta_data[valid_cells, sample_var],
+      group = meta_data[valid_cells, group_var],
+      celltype = meta_data[valid_cells, celltype_var],
+      gene = g,
+      counts = as.numeric(raw_counts[g, ]),
+      total_umi = seurat_obj$nCount_RNA[valid_cells]
+    )
+  })
+  df <- do.call(rbind, df_list) %>% filter(!is.na(group))
 
   # 3. Pseudo-bulk Aggregation
-  grouping_cols <- if(split_mode) c("sample", "group", "celltype") else c("sample", "group")
+  grouping_cols <- c("sample", "group", "gene")
+  if (split_mode_cell) grouping_cols <- c(grouping_cols, "celltype")
   
   pb_df <- df %>%
     group_by(across(all_of(grouping_cols))) %>%
@@ -122,49 +135,39 @@ sc.pseudo.expr.vln <- function(seurat_obj,
 
     p <- ggplot(data, aes(x = group, y = Expression, fill = group)) +
       geom_violin(trim = TRUE, scale = "width", alpha = 0.7, color = "black") +
-      
-      # [Updated] Jitter Point with custom fill color
-      geom_jitter(width = 0.1, size = 2, shape = 21, fill = dot_color, color = "black") +
-      
-      # Median Line
+      geom_jitter(width = 0.1, size = 1.5, shape = 21, fill = dot_color, color = "black") +
       stat_summary(fun = median, fun.min = median, fun.max = median, 
-                   geom = "crossbar", width = 0.4, color = "black", linewidth = 0.8) +
-                   
+                   geom = "crossbar", width = 0.4, color = "black", linewidth = 0.6) +
       theme_classic() +
-      labs(title = paste0(target_gene, " (", method_type, ")"), y = y_lab, x = "") +
-      theme(plot.title = element_text(face="bold", hjust=0.5, size=13),
-            axis.text.x = element_text(angle=45, hjust=1, face="bold", size=11))
+      labs(title = paste0("Method: ", method_type), y = y_lab, x = "") +
+      theme(plot.title = element_text(face="bold", hjust=0.5, size=12),
+            axis.text.x = element_text(angle=45, hjust=1, face="bold", size=10))
 
-    if (split_mode) {
-      p <- p + facet_wrap(~celltype, scales = "free_y") +
-        theme(strip.background = element_blank(), strip.text = element_text(face="bold", size=12))
+    # Faceting Logic for Genes and Celltypes
+    if (length(target_gene) > 1 && split_mode_cell) {
+      p <- p + facet_grid(gene ~ celltype, scales = "free_y")
+    } else if (length(target_gene) > 1) {
+      p <- p + facet_wrap(~gene, scales = "free_y")
+    } else if (split_mode_cell) {
+      p <- p + facet_wrap(~celltype, scales = "free_y")
     }
 
     if (!is.null(color_pal)) p <- p + scale_fill_manual(values = color_pal)
-    
     if (!is.null(comparisons)) {
       p <- p + stat_compare_means(comparisons = comparisons, method = stats_method, label = stats_label)
     }
+    if (!show_legend) p <- p + theme(legend.position = "none")
     
-    if (!show_legend) {
-      p <- p + theme(legend.position = "none")
-    }
-    
-    return(p)
+    return(p + theme(strip.background = element_blank(), strip.text = element_text(face="bold", size=11)))
   }
 
-  # 6. Logic for multiple methods vs single method
+  # 6. Final Layout
   if (method == "all") {
     p_raw <- generate_plot(pb_df, "raw.expression")
     p_cpm <- generate_plot(pb_df, "log.cpm")
     p_norm <- generate_plot(pb_df, "log.norm")
-    
     combined_plot <- p_raw | p_cpm | p_norm
-    
-    if (show_legend) {
-      combined_plot <- combined_plot + plot_layout(guides = "collect")
-    }
-    
+    if (show_legend) combined_plot <- combined_plot + plot_layout(guides = "collect")
     return(combined_plot)
   } else {
     return(generate_plot(pb_df, method))
