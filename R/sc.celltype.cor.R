@@ -1,83 +1,102 @@
 #' @title Cell-Type Co-expression Correlation Analysis (sc.celltype.cor)
 #'
 #' @description 
-#' Analyzes the systemic co-expression network of a target gene across different cell types 
-#' within the tumor microenvironment (TME) or clinical cohorts. It calculates the proportion 
-#' of cells expressing the target gene per biological replicate and computes Pearson 
-#' correlations between all possible cell type pairs. It also generates a publication-ready 
-#' linear regression scatter plot for a specific pair of interest.
-#'
+#' This function performs a systemic co-expression network analysis of a target gene 
+#' across diverse cell types within the tumor microenvironment (TME) or clinical cohorts. 
+#' It calculates the proportion of cells expressing the target gene per biological replicate 
+#' and computes Pearson correlations between cell type pairs to identify coordinated 
+#' expression dynamics.
+#' 
 #' @details 
+#' **Dual Modes of Operation:**
+#' 1. **Targeted Mode (`only.significant = FALSE`):** Validates a specific hypothesis by 
+#'    visualizing the linear regression between two predefined cell types (`A.cell` and `B.cell`).
+#' 2. **Auto-Screening Mode (`only.significant = TRUE`):** Acts as a powerful discovery tool. 
+#'    It scans all possible pairwise combinations of cell types, calculates their correlation 
+#'    coefficients and p-values across conditions, and extracts the significant networks 
+#'    (`p_value <= p_cutoff`). To prevent graphical memory overload, it saves each significant 
+#'    plot as an individual element within a named list.
+#' 
 #' **Biological Significance:**
-#' This function is crucial for identifying coordinated immune evasion mechanisms or 
-#' systemic cross-talk. For instance, a strong positive correlation of an inhibitory 
-#' receptor (e.g., VSIR, LAIR1) between Progenitors and Tregs specifically in a disease 
-#' state (like MDS) provides strong evidence for a synchronized immunosuppressive network.
+#' Identifying strong positive correlations of inhibitory receptors (e.g., LAIR1, VSIR) 
+#' between specific lineages (e.g., Progenitors and Regulatory T cells) exclusively within 
+#' a disease state provides robust evidence for synchronized, systemic immunosuppressive 
+#' cross-talk.
 #'
 #' @param seurat_obj A Seurat object. Ensure the default assay is set to "RNA".
-#' @param target_gene Character. The gene of interest (e.g., "VSIR", "LAIR1").
-#' @param A.cell Character. The first cell type of interest for the scatter plot.
-#' @param B.cell Character. The second cell type of interest for the scatter plot.
-#' @param celltype_col Character. Metadata column for cell types. Default: "detailed.celltypes".
-#' @param group_col Character. Metadata column for experimental groups. Default: "condition".
-#' @param sample_col Character. Metadata column for biological replicates. Default: "orig.ident".
-#' @param min_cells Integer. Minimum number of total cells required in a sample to be included. Default: 0.
+#' @param target_gene Character. The gene of interest to analyze (e.g., "VSIR", "LAIR1").
+#' @param A.cell Character. The first cell type (Y-axis). Ignored if only.significant = TRUE. Default: NULL.
+#' @param B.cell Character. The second cell type (X-axis). Ignored if only.significant = TRUE. Default: NULL.
+#' @param celltype_col Character. Metadata column name for cell types. Default: "detailed.celltypes".
+#' @param group_col Character. Metadata column name for experimental groups. Default: "condition".
+#' @param sample_col Character. Metadata column name for biological replicates. Default: "orig.ident".
+#' @param min_cells Integer. Minimum total cells required in a sample to be included in the analysis. Default: 0.
+#' @param only.significant Logical. If TRUE, scans all pairs and saves plots meeting the p_cutoff into a list. Default: FALSE.
+#' @param p_cutoff Numeric. The p-value threshold for filtering significant pairs. Default: 0.06.
+#' @param color.use Vector. Custom color palette for experimental groups. Default: NULL.
 #'
-#' @return A list containing two elements:
+#' @return A list containing:
 #' \itemize{
-#'   \item \code{cor_table}: A data frame of all significant pairwise Pearson correlations.
-#'   \item \code{plot}: A ggplot2 object displaying the linear regression of the target cell pair.
+#'   \item \code{cor_table}: A comprehensive data frame of pairwise Pearson correlations and significance flags.
+#'   \item \code{plot}: If `only.significant = FALSE`, a single ggplot2 object. 
+#'         If `only.significant = TRUE`, a named list of ggplot2 objects accessible via `$plot$CellA_CellB`.
 #' }
+#' @author Hyundong Yoon
 #' @export
 #'
 #' @examples
-#' # 1. Execute the function
-#' # VSIR_correlation <- sc.celltype.cor(
+#' # Example 1: Auto-Screening for significant VSIR networks
+#' # auto_results <- sc.celltype.cor(
 #' #   seurat_obj = Integ_object, 
-#' #   target_gene = "VSIR", 
-#' #   A.cell = "Progenitor", 
-#' #   B.cell = "Regulatory.Tcell"
+#' #   target_gene = "VSIR",
+#' #   only.significant = TRUE,
+#' #   color.use = c("Healthy.donor"="#003a6f", "MDS"="#d67043", "sAML"="darkred")
 #' # )
 #' # 
-#' # # 2. Display the visualization graph (can be saved directly)
-#' # VSIR_correlation$plot
-#' # 
-#' # # 3. Check the significant network table between all cells
-#' # View(VSIR_correlation$cor_table)
-#' # 
-#' # # 4. Export the table to a file
-#' # # write.table(VSIR_correlation$cor_table, file = '~/clean_view.txt', quote = FALSE, row.names = FALSE, sep = '\t')
+#' # # Access a specific significant pair's plot:
+#' # auto_results$plot$Progenitor_Regulatory.Tcell
+#' #
+#' # Example 2: Targeted validation of a specific pair
+#' # specific_results <- sc.celltype.cor(
+#' #   seurat_obj = Integ_object, 
+#' #   target_gene = "LAIR1",
+#' #   A.cell = "Progenitor",
+#' #   B.cell = "Classical.Monocyte"
+#' # )
 
 sc.celltype.cor <- function(seurat_obj,
-                                   target_gene,
-                                   A.cell,
-                                   B.cell,
-                                   celltype_col = "detailed.celltypes",
-                                   group_col = "condition",
-                                   sample_col = "orig.ident",
-                                   min_cells = 0) {
+                            target_gene,
+                            A.cell = NULL,
+                            B.cell = NULL,
+                            celltype_col = "detailed.celltypes",
+                            group_col = "condition",
+                            sample_col = "orig.ident",
+                            min_cells = 0,
+                            only.significant = FALSE,
+                            p_cutoff = 0.06,
+                            color.use = NULL) {
   
   # Check required dependencies
   if (!requireNamespace("dplyr", quietly = TRUE)) stop("Please install 'dplyr'.")
   if (!requireNamespace("tidyr", quietly = TRUE)) stop("Please install 'tidyr'.")
   if (!requireNamespace("ggplot2", quietly = TRUE)) stop("Please install 'ggplot2'.")
-  if (!requireNamespace("ggpubr", quietly = TRUE)) stop("Please install 'ggpubr' for stat_cor().")
+  if (!requireNamespace("ggpubr", quietly = TRUE)) stop("Please install 'ggpubr'.")
   if (!requireNamespace("rlang", quietly = TRUE)) stop("Please install 'rlang'.")
   
   cat(sprintf("[1] Extracting expression data for %s...\n", target_gene))
   
-  # Set default assay to RNA safely
   Seurat::DefaultAssay(seurat_obj) <- "RNA"
   
-  # Safely fetch data and standardize column names
   vars_to_fetch <- c(sample_col, group_col, celltype_col, target_gene)
   data.df <- Seurat::FetchData(seurat_obj, vars = vars_to_fetch)
   colnames(data.df) <- c("sample_id", "condition", "celltype", "expression")
   
   valid_cells <- unique(as.character(data.df$celltype))
   
-  if (!(A.cell %in% valid_cells) || !(B.cell %in% valid_cells)) {
-    stop("Target cell types (A.cell or B.cell) not found in the specified celltype column.")
+  # Validation for targeted mode
+  if (!only.significant) {
+    if (is.null(A.cell) || is.null(B.cell)) stop("A.cell and B.cell must be provided if only.significant = FALSE.")
+    if (!(A.cell %in% valid_cells) || !(B.cell %in% valid_cells)) stop("Target cell types not found in the specified celltype column.")
   }
   
   cat("[2] Calculating target gene positive proportions per sample...\n")
@@ -138,52 +157,92 @@ sc.celltype.cor <- function(seurat_obj,
         TRUE ~ "Weak/None"
       ),
       Significance = dplyr::case_when(
-        P_value < 0.05 ~ "Significant",
+        P_value < 0.05 ~ "Significant (<0.05)",
+        P_value <= p_cutoff ~ sprintf("Marginal (<=%s)", p_cutoff),
         TRUE ~ "Insignificant"
       )
     ) %>%
-    dplyr::arrange(Condition, Significance, dplyr::desc(abs(R_value))) %>%
-    dplyr::filter(Correlation_Type != "Weak/None")
+    dplyr::arrange(Condition, P_value, dplyr::desc(abs(R_value)))
   
-  cat(sprintf("[4] Generating linear regression scatter plot for %s vs %s...\n", B.cell, A.cell))
-  
-  plot.df <- stats.df %>%
-    dplyr::filter(celltype %in% c(A.cell, B.cell)) %>%
-    dplyr::select(condition, sample_id, celltype, pct_pos) %>%
-    tidyr::pivot_wider(names_from = celltype, values_from = pct_pos) %>%
-    na.omit()
-  
-  # Ensure standard naming if condition matches the user's specific colors
-  color_mapping <- c("MDS" = "#d67043", "Healthy.donor" = "#003a6f")
-  
-  p <- ggplot2::ggplot(plot.df, ggplot2::aes(x = !!rlang::sym(B.cell), y = !!rlang::sym(A.cell))) +
-    ggplot2::geom_point(ggplot2::aes(color = condition), size = 3, alpha = 0.7) +
-    ggplot2::geom_smooth(method = "lm", color = "black", fill = "lightgray", linewidth = 0.8) +
-    ggplot2::facet_wrap(~condition, scales = "fixed") +
-    ggpubr::stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "top", size = 4) +
-    ggplot2::labs(
-      title = paste0("Correlation of ", target_gene, "+ Proportion"),
-      subtitle = paste0(B.cell, " vs ", A.cell),
-      x = paste0(target_gene, "+ in ", B.cell, " (%)"),
-      y = paste0(target_gene, "+ in ", A.cell, " (%)"),
-      color = "Group"
-    ) +
-    ggplot2::theme_bw() +
-    ggplot2::theme(
-      plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 15),
-      strip.text = ggplot2::element_text(size = 12, face = "bold"),
-      legend.position = "bottom"
-    )
-  
-  # Apply specific colors if MDS and Healthy.donor are present
-  if (all(unique(plot.df$condition) %in% names(color_mapping))) {
-    p <- p + ggplot2::scale_color_manual(values = color_mapping)
+  # --- Visualization Helper Function ---
+  create_scatter <- function(y_cell, x_cell) {
+    plot.df <- stats.df %>%
+      dplyr::filter(celltype %in% c(y_cell, x_cell)) %>%
+      dplyr::select(condition, sample_id, celltype, pct_pos) %>%
+      tidyr::pivot_wider(names_from = celltype, values_from = pct_pos) %>%
+      na.omit()
+    
+    p <- ggplot2::ggplot(plot.df, ggplot2::aes(x = !!rlang::sym(x_cell), y = !!rlang::sym(y_cell))) +
+      ggplot2::geom_point(ggplot2::aes(color = condition), size = 2.5, alpha = 0.8) +
+      ggplot2::geom_smooth(method = "lm", color = "black", fill = "lightgray", linewidth = 0.8, formula = y ~ x) +
+      ggplot2::facet_wrap(~condition, scales = "fixed") +
+      ggpubr::stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "top", size = 3.5) +
+      ggplot2::labs(
+        title = paste0(x_cell, " vs ", y_cell),
+        x = paste0(target_gene, "+ in ", x_cell, " (%)"),
+        y = paste0(target_gene, "+ in ", y_cell, " (%)"),
+        color = "Group"
+      ) +
+      ggplot2::theme_bw() +
+      ggplot2::theme(
+        plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 12),
+        strip.text = ggplot2::element_text(size = 11, face = "bold"),
+        legend.position = "bottom"
+      )
+    
+    # Apply user-defined color palette if provided
+    if (!is.null(color.use)) {
+      p <- p + ggplot2::scale_color_manual(values = color.use)
+    }
+    return(p)
+  }
+
+  # --- Plot Generation Logic ---
+  if (only.significant) {
+    cat(sprintf("[4] only.significant = TRUE. Screening for pairs with P-value <= %s in any condition...\n", p_cutoff))
+    
+    sig_pairs_df <- all_results %>%
+      dplyr::filter(P_value <= p_cutoff) %>%
+      dplyr::select(Cell_1, Cell_2) %>%
+      dplyr::distinct()
+    
+    if (nrow(sig_pairs_df) == 0) {
+      cat("No significant pairs found under the defined p-value cutoff.\n")
+      final_plot <- NULL
+    } else {
+      cat(sprintf("Found %d significant pair(s). Storing plots in a named list...\n", nrow(sig_pairs_df)))
+      
+      plot_list <- list()
+      plot_names <- character(nrow(sig_pairs_df))
+      
+      for (i in seq_len(nrow(sig_pairs_df))) {
+        c1 <- sig_pairs_df$Cell_1[i]
+        c2 <- sig_pairs_df$Cell_2[i]
+        
+        # Create individual plot and store in list
+        plot_list[[i]] <- create_scatter(c1, c2)
+        # Construct the requested naming convention: Cell1_Cell2
+        plot_names[i] <- paste0(c1, "_", c2) 
+      }
+      
+      # Assign names to the list elements
+      names(plot_list) <- plot_names
+      final_plot <- plot_list
+    }
+    
+    # Filter the returned cor_table to highlight only these significant pairs
+    clean_view <- clean_view %>%
+      dplyr::inner_join(sig_pairs_df, by = c("Cell_1", "Cell_2"))
+    
+  } else {
+    cat(sprintf("[4] Generating linear regression scatter plot for %s vs %s...\n", B.cell, A.cell))
+    final_plot <- create_scatter(A.cell, B.cell)
   }
   
-  cat("[Done] Successfully computed network and generated plot.\n")
+  cat("[Done] Successfully computed network and generated plots.\n")
   
   return(list(
     cor_table = clean_view,
-    plot = p
+    plot = final_plot
   ))
 }
