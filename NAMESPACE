@@ -9,6 +9,8 @@ export(sc.eCDF)
 export(sc.pseudo.expr.vln)
 export(sc.expr.prop.bar)
 export(sc.expr.density.split)
+export(sc.RunAUCell)
+exprot(sc.PlotAUCell)
 
 # --- Primary Frameworks ---
 import(Seurat)
