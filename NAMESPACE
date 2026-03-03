@@ -1,8 +1,6 @@
 # --- Functions Export ---
 export(sc.CompactSeurat)
-export(sc.linux.RunMAST)
-export(sc.windows.RunMAST)
-export(sc.RunWilcox)
+export(sc.deg.mast)
 export(sc.pseudobulk.DE)
 export(sc.celltype.cor)
 export(sc.eCDF)
