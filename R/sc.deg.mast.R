@@ -17,7 +17,7 @@
 #' @return A merged data frame containing DE results for all cell types.
 #' @author Hyundong Yoon
 #' @export
-sc.deg.mast <- function(seurat_obj,
+sc.deg.cohort <- function(seurat_obj,
                           ident.1,
                           ident.2,
                           celltype_col = "detailed.celltypes",
@@ -26,7 +26,7 @@ sc.deg.mast <- function(seurat_obj,
                           logfc.threshold = 0,
                           min.pct = 0,
                           gc_interval = 5) {
-  
+
   # Required libraries
   suppressPackageStartupMessages({
     library(Seurat)
@@ -34,7 +34,7 @@ sc.deg.mast <- function(seurat_obj,
     library(tibble)
     library(MAST)
   })
-  
+
   # 1. Preparation: Create an aggregate identifier
   cat("[1/3] Preparing aggregate metadata...\n")
   seurat_obj$tmp_aggregate <- paste(seurat_obj[[celltype_col, drop = TRUE]], 
@@ -43,21 +43,21 @@ sc.deg.mast <- function(seurat_obj,
   all_celltypes <- unique(as.character(seurat_obj[[celltype_col, drop = TRUE]]))
   total_types <- length(all_celltypes)
   valid_groups <- unique(seurat_obj$tmp_aggregate)
-  
+
   DEG_list <- list()
   start_time <- Sys.time()
-  
+
   cat(sprintf("[2/3] Starting DE Analysis for %s cell types (Test: %s)\n", total_types, test.use))
   cat(sprintf("Comparison: %s vs %s\n", ident.1, ident.2))
-  
+
   # 2. Main Loop
   for (i in seq_along(all_celltypes)) {
     celltype <- all_celltypes[i]
     group1_id <- paste0(celltype, "_", ident.1)
     group2_id <- paste0(celltype, "_", ident.2)
-    
+
     cat(sprintf("\n[%d/%d] (%s) Processing: %s ... ", i, total_types, format(Sys.time(), "%H:%M:%S"), celltype))
-    
+
     # Check if both comparison groups exist for this cell type
     if (group1_id %in% valid_groups && group2_id %in% valid_groups) {
       
@@ -93,23 +93,23 @@ sc.deg.mast <- function(seurat_obj,
               TRUE ~ "#afb0b3"
             )
           )
-        
+
         DEG_list[[celltype]] <- deg
         cat("Success!")
-        
+
       }, error = function(e) {
         cat(sprintf("Failed: %s", e$message))
       })
-      
+
       # Clean up sub-object to free memory
       rm(sub_obj)
       if (i %% gc_interval == 0) gc(verbose = FALSE)
-      
+
     } else {
       cat("Skipped (One or both groups missing)")
     }
   }
-  
+
   # 3. Consolidation
   cat("\n\n[3/3] Merging results into final dataframe...\n")
   DEG_final_df <- dplyr::bind_rows(DEG_list)
@@ -120,6 +120,6 @@ sc.deg.mast <- function(seurat_obj,
   cat("========================================================\n")
   cat(sprintf("Analysis Completed in: %s\n", format(processing_duration)))
   cat("========================================================\n")
-  
+
   return(DEG_final_df)
 }
