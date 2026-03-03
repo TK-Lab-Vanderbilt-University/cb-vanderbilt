@@ -3,7 +3,8 @@
 #' @description
 #' This function takes a Seurat object, aggregates counts into pseudobulk profiles 
 #' based on samples and clusters, and performs DE analysis using edgeR. 
-#' It dynamically filters samples for each cluster to ensure statistical validity.
+#' It dynamically filters samples for each cluster to ensure statistical validity
+#' and adds a comparison metadata column to the output.
 #'
 #' @param obj A Seurat object.
 #' @param celltype_col Character. Metadata column name for cell types. Default: "detailed.celltypes".
@@ -12,7 +13,7 @@
 #' @param case Character. The test group condition (e.g., "MDS").
 #' @param control Character. The reference/control group condition (e.g., "Healthy.donor").
 #'
-#' @return A consolidated data frame of significant DEGs across all clusters.
+#' @return A consolidated data frame of significant DEGs across all clusters with comparison info.
 #' @export
 #'
 #' @import Seurat
@@ -79,23 +80,26 @@ sc.pseudobulk.DE <- function(obj,
     })
 
   # ----------------------------------------------------------------------------
-  # 2. Cluster-wise DE Analysis Loop (User Provided Logic)
+  # 2. Cluster-wise DE Analysis Loop
   # ----------------------------------------------------------------------------
   message("Step 2: Running differential expression analysis per cluster...")
   
   all_clusters <- names(pb)
   DE_list <- list()
+  
+  # Define comparison label for the output column
+  comparison_label <- paste0(case, " vs ", control)
 
   for (cluster in all_clusters) {
     cat("Processing:", cluster, "\n")
     
-    # 1. Extract count matrix
+    # Extract count matrix
     y_raw <- pb[[cluster]]
     
-    # 2. Identify samples in this cluster
+    # Identify samples in this cluster
     sample_ids <- colnames(y_raw)
     
-    # 3. Subset and align metadata
+    # Subset and align metadata
     sub_ei <- ei %>% dplyr::filter(!!rlang::sym(sample_col) %in% sample_ids)
     sub_ei <- sub_ei[match(sample_ids, sub_ei[[sample_col]]), , drop = FALSE]
     
@@ -134,6 +138,7 @@ sc.pseudobulk.DE <- function(obj,
         dplyr::mutate(
           gene = rownames(.), 
           cluster_id = cluster,
+          comparison = comparison_label,
           # Regulation logic based on 0.25/-0.25 threshold
           Regulation = dplyr::case_when(
             logFC > 0.25 ~ "Up",
