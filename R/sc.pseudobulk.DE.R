@@ -1,156 +1,178 @@
-#' @title Robust Pseudo-bulk Differential Expression Analysis via edgeR
+#' Pseudobulk Differential Expression Analysis for Single-Cell Data
 #'
-#' @description 
-#' Performs pseudo-bulk DE analysis by aggregating raw counts across biological replicates. 
-#' This function implements the edgeR Likelihood Ratio Test (LRT) framework, which provides 
-#' a balanced and scientifically defensible sensitivity (less conservative than QLFit) 
-#' for clinical single-cell datasets.
+#' @description
+#' This function performs a cluster-wise pseudobulk DE analysis using a Seurat object. 
+#' It aggregates counts per sample and cell type, then utilizes the edgeR 
+#' Quasi-Likelihood framework combined with limma contrasts for robust statistical testing.
 #'
-#' @details 
-#' **Key Improvements:**
-#' \itemize{
-#'   \item **Integer Summation:** Replaces "mean" with "sum" for count aggregation, 
-#'   adhering to edgeR's Negative Binomial requirements and boosting statistical power.
-#'   \item **FDR Rescue:** Uses `edgeR::filterByExpr` to remove low-count noise genes, 
-#'   drastically improving the adjusted p-value (FDR) for true biological targets.
-#'   \item **Memory Efficiency:** Avoids heavy Intermediate objects (like SCE) and 
-#'   utilizes sequential processing with explicit garbage collection (`gc()`) to 
-#'   run safely on machines with limited RAM.
-#'   \item **Scientific Defensibility:** Uses the Likelihood Ratio Test (LRT), a 
-#'   gold-standard in bulk RNA-seq, which is less prone to false negatives in 
-#'   clinical cohorts compared to the overly strict QLF test.
-#' }
+#' @param obj A Seurat object containing the single-cell data.
+#' @param celltype_col Character. Metadata column name for cell type annotations. Default: "detailed.celltypes".
+#' @param condition_col Character. Metadata column name for experimental conditions. Default: "condition".
+#' @param sample_col Character. Metadata column name for sample/source identifiers. Default: "orig.ident".
+#' @param case Character. The condition level representing the test group (e.g., "MDS").
+#' @param control Character. The condition level representing the reference group (e.g., "Healthy.donor").
 #'
-#' @param seurat_obj A Seurat object containing raw 'counts'.
-#' @param celltype_col Character. Metadata column for cell type annotations. Default: "detailed.celltypes".
-#' @param sample_col Character. Metadata column for biological replicates (e.g., "orig.ident"). Default: "orig.ident".
-#' @param group_col Character. Metadata column for experimental groups (e.g., "condition"). Default: "condition".
-#' @param case.group Character. Name of the test group (e.g., "MDS"). Default: "MDS".
-#' @param ctrl.group Character. Name of the control group (e.g., "Healthy.donor"). Default: "Healthy.donor".
-#' @param logfc_cutoff Numeric. Threshold for log2 fold change categorization. Default: 0.25.
-#' @param significant.cut.off Numeric. P-value threshold for significance labeling. Default: 0.05.
-#' @param filter_rows Logical. If TRUE, returns only significant results. Default: FALSE.
-#'
-#' @return A tidy data frame with pseudo-bulk DE results.
+#' @return A consolidated data frame of significant DEGs (p < 0.05) across all clusters.
 #' @export
+#'
+#' @import Seurat
+#' @import SingleCellExperiment
+#' @import edgeR
+#' @import limma
+#' @import dplyr
+#' @import purrr
+#' @import stringr
+#' @import Matrix.utils
+#' @import magrittr
+sc.pseudobulk.DE <- function(obj, 
+                             celltype_col = "detailed.celltypes", 
+                             condition_col = "condition", 
+                             sample_col = "orig.ident",
+                             case = "MDS",
+                             control = "Healthy.donor") {
 
-sc.pseudobulk.DE = function(seurat_obj,
-                            celltype_col="detailed.celltypes",
-                            sample_col="orig.ident",
-                            group_col="condition",
-                            case.group="MDS",
-                            ctrl.group="Healthy.donor",
-                            logfc_cutoff=0.25,
-                            significant.cut.off=0.05,
-                            filter_rows=FALSE) {
+# 1. Metadata Preparation
+# ----------------------------------------------------------------------------
+message("Step 1: Preparing metadata and identifiers...")
+
+# Create combined ID for pseudobulk grouping
+obj$pseudobulk_id_aggregate <- paste(
+  obj[[celltype_col, drop = TRUE]], 
+  obj[[condition_col, drop = TRUE]], 
+  sep = "_"
+)
+
+# Set identity to handle Seurat v5 vector requirements
+obj <- Seurat::SetIdent(obj, value = obj[["pseudobulk_id_aggregate", drop = TRUE]])
+
+# Extract core data components
+counts <- Seurat::GetAssayData(object = obj, slot = "counts", assay = "RNA")
+metadata <- obj@meta.data
+metadata$cluster_id <- factor(Seurat::Idents(obj))
+
+# 2. Pseudobulk Aggregation
+# ----------------------------------------------------------------------------
+message("Step 2: Aggregating single-cell counts to pseudobulk profiles...")
+
+# Convert to SingleCellExperiment object
+sce <- SingleCellExperiment::SingleCellExperiment(
+  assays = list(counts = counts), 
+  colData = metadata
+)
+
+# Prepare experimental info (ei) mapping
+n_cells <- table(sce[[sample_col]]) %>% as.vector()
+names(n_cells) <- names(table(sce[[sample_col]]))
+m <- match(names(n_cells), sce[[sample_col]])
+
+ei <- data.frame(colData(sce)[m, ], n_cells, row.names = NULL) %>%
+  dplyr::select(dplyr::all_of(c(sample_col, condition_col, "n_cells")))
+
+# Set up grouping variables for matrix summation
+groups <- colData(sce)[, c("cluster_id", sample_col)]
+groups[[sample_col]] <- factor(groups[[sample_col]])
+
+# Aggregate counts using matrix multiplication for efficiency
+pb <- Matrix.utils::aggregate.Matrix(t(SingleCellExperiment::counts(sce)), 
+                                     groupings = groups, fun = "sum")
+
+# Parse rownames to extract cluster identities
+splitf <- sapply(stringr::str_split(rownames(pb), pattern = "_", n = 2), `[`, 1)
+
+# Split aggregated matrix into a cluster-wise list
+pb_list <- split.data.frame(pb, factor(splitf)) %>%
+  lapply(function(u) {
+    new_colnames <- gsub(".*_", "", rownames(u))
+    t(u) %>% magrittr::set_colnames(new_colnames)
+  })
+
+# 3. Cluster-wise DE Analysis Loop (edgeR + limma)
+# ----------------------------------------------------------------------------
+message("Step 3: Executing differential expression analysis...")
+
+all_clusters <- names(pb_list)
+DE_list <- list()
+
+for (cluster in all_clusters) {
+  cat("  Processing:", cluster, "... ")
   
-  if (!requireNamespace("edgeR", quietly = TRUE)) stop("Please install 'edgeR'.")
-  if (!requireNamespace("Matrix.utils", quietly = TRUE)) stop("Please install 'Matrix.utils'.")
+  y_raw <- pb_list[[cluster]]
+  sample_ids <- colnames(y_raw)
   
-  start_time <- Sys.time()
+  # Filter metadata for samples active in current cluster
+  sub_ei <- ei %>% dplyr::filter(!!rlang::sym(sample_col) %in% sample_ids)
+  sub_ei <- sub_ei[match(sample_ids, sub_ei[[sample_col]]), , drop = FALSE]
   
-  # [1] Data Preparation
-  cat("[1] Extracting raw counts and building metadata...\n")
-  counts <- Seurat::GetAssayData(seurat_obj, layer = "counts", assay = "RNA")
-  meta <- seurat_obj@meta.data
-  
-  # Create a robust grouping string using a unique delimiter
-  # This prevents errors if celltype names contain underscores
-  group_strings <- paste(meta[[celltype_col]], meta[[sample_col]], sep = "|||")
-  
-  # [2] Aggregation (CRITICAL: sum for integer counts)
-  cat("[2] Summing counts into pseudo-bulk profiles...\n")
-  pb_mat <- Matrix.utils::aggregate.Matrix(t(counts), groupings = group_strings, fun = "sum")
-  pb_mat <- t(pb_mat) # Genes x (Celltype|||Sample)
-  
-  # Parse back the aggregated names
-  pb_colnames <- colnames(pb_mat)
-  parsed_ct <- sapply(strsplit(pb_colnames, "|||", fixed = TRUE), `[`, 1)
-  parsed_sample <- sapply(strsplit(pb_colnames, "|||", fixed = TRUE), `[`, 2)
-  
-  # Consolidate sample-level metadata
-  ei <- unique(meta[, c(sample_col, group_col)])
-  colnames(ei) <- c("sample_id", "condition")
-  
-  all_clusters <- unique(parsed_ct)
-  DE_list <- list()
-  
-  cat("[3] Starting Sequential edgeR LRT Analysis...\n")
-  for (cluster in all_clusters) {
-    cat(sprintf(" -> Analyzing Cluster: %s\n", cluster))
-    
-    # Subset matrix for the current cell type
-    idx <- which(parsed_ct == cluster)
-    y_mat <- pb_mat[, idx, drop = FALSE]
-    colnames(y_mat) <- parsed_sample[idx]
-    
-    # Align metadata
-    sub_ei <- ei[ei$sample_id %in% colnames(y_mat), , drop = FALSE]
-    sub_ei <- sub_ei[match(colnames(y_mat), sub_ei$sample_id), ]
-    
-    # Define factor levels (Control vs Case)
-    sub_ei$condition <- factor(sub_ei$condition, levels = c(ctrl.group, case.group))
-    
-    # Check for sufficient replicates (at least 2 per group for dispersion estimation)
-    if (length(levels(sub_ei$condition)) < 2 || any(table(sub_ei$condition) < 2)) {
-      cat("    Skip: Insufficient biological replicates.\n")
-      next
-    }
-    
-    tryCatch({
-      # Initialize edgeR object
-      y <- edgeR::DGEList(counts = y_mat, samples = sub_ei)
-      
-      # [CRITICAL] filterByExpr: Removes low-count genes to boost FDR power
-      design <- model.matrix(~ condition, data = y$samples)
-      keep <- edgeR::filterByExpr(y, design = design)
-      y <- y[keep, , keep.lib.sizes = FALSE]
-      
-      # Normalization and Dispersion Estimation
-      y <- edgeR::calcNormFactors(y)
-      y <- edgeR::estimateDisp(y, design)
-      
-      # [CRITICAL] glmLRT: More sensitive (less strict) than QLFit for clinical data
-      fit <- edgeR::glmFit(y, design)
-      lrt <- edgeR::glmLRT(fit, coef = 2) 
-      
-      # Formatting Results
-      res <- edgeR::topTags(lrt, n = Inf, sort.by = "none")$table
-      res <- tibble::rownames_to_column(res, var = "gene") %>%
-        dplyr::mutate(cluster_id = cluster,
-                      compare = paste0(case.group, "_vs_", ctrl.group)) %>%
-        dplyr::rename(p_val = PValue, p_adj = FDR, log2FC = logFC)
-      
-      DE_list[[cluster]] <- res
-    }, error = function(e) {
-      cat("    Error in", cluster, ":", e$message, "\n")
-    })
-    
-    # Explicit memory cleanup
-    rm(y, fit, lrt); gc()
+  # Check if both Case and Control groups exist in the cluster
+  if (length(unique(sub_ei[[condition_col]])) < 2) {
+    cat("Skipped: Missing comparison group.\n")
+    next
   }
   
-  # [4] Post-processing and Labeling
-  cat("[4] Merging results and assigning regulation status...\n")
-  final_res <- dplyr::bind_rows(DE_list) %>%
+  tryCatch({
+    # Initialize edgeR DGEList
+    y <- edgeR::DGEList(y_raw, remove.zeros = TRUE)
+    y <- edgeR::calcNormFactors(y)
+    
+    # Construct Design Matrix
+    sub_ei[[condition_col]] <- factor(sub_ei[[condition_col]])
+    design_formula <- as.formula(paste("~ 0 +", condition_col))
+    design <- model.matrix(design_formula, data = sub_ei)
+    colnames(design) <- levels(sub_ei[[condition_col]])
+    
+    # Contrast Definition (limma required)
+    contrast_logic <- paste0(case, " - ", control)
+    contrast <- limma::makeContrasts(contrasts = contrast_logic, levels = design)
+    
+    # Model Fitting
+    y <- edgeR::estimateDisp(y, design)
+    fit <- edgeR::glmQLFit(y, design)
+    qlf <- edgeR::glmQLFTest(fit, contrast = contrast)
+    
+    # Results Processing
+    res_table <- edgeR::topTags(qlf, n = Inf, sort.by = "none")$table %>%
+      dplyr::mutate(gene = rownames(.), cluster_id = cluster) %>%
+      dplyr::rename(p_val = PValue, p_adj = FDR)
+    
+    DE_list[[cluster]] <- res_table
+    cat("Success!\n")
+    
+  }, error = function(e) {
+    cat("Error in cluster", cluster, ":", e$message, "\n")
+  })
+}
+
+# 4. Final Formatting and Consolidation
+# ----------------------------------------------------------------------------
+message("Step 4: Finalizing and merging results...")
+
+if (length(DE_list) == 0) {
+  warning("No significant DEGs found or no clusters were successfully processed.")
+  return(data.frame())
+}
+
+# Apply significance-based coloring and regulation labels
+DE_final_list <- lapply(DE_list, function(DE) {
+  DE %>%
     dplyr::mutate(
-      Regulation = dplyr::case_when(
-        log2FC > logfc_cutoff & p_val < significant.cut.off ~ "Up",
-        log2FC < -logfc_cutoff & p_val < significant.cut.off ~ "Down",
-        TRUE ~ "Unchanged"
-      ),
       color = dplyr::case_when(
-        Regulation == "Up" ~ "#f2210a",
-        Regulation == "Down" ~ "#3158e8",
+        logFC > 0.25 & p_val < 0.05 ~ '#f2210a',
+        logFC < -0.25 & p_val < 0.05 ~ '#3158e8',
         TRUE ~ "#afb0b3"
+      ),
+      Regulation = dplyr::case_when(
+        logFC > 0.5 ~ "Up",
+        logFC < -0.5 ~ "Down",
+        TRUE ~ "Unchanged"
       )
     ) %>%
-    dplyr::filter(!is.na(p_val))
-  
-  if(filter_rows) {
-    final_res <- final_res %>% dplyr::filter(p_val < significant.cut.off)
-  }
-  
-  cat("\n[Final Done] Total processing time:", format(Sys.time() - start_time), "\n")
-  return(final_res)
+    # Retain only significant entries (p < 0.05)
+    dplyr::filter(p_val < 0.05 & !is.na(p_val))
+})
+
+# Merge list into a single long-format data frame
+DE.all.df <- do.call(rbind, DE_final_list)
+
+message("[COMPLETE] All clusters processed successfully.")
+return(DE.all.df)
 }
