@@ -17,7 +17,7 @@
 #' @return A merged data frame containing DE results for all cell types.
 #' @author Hyundong Yoon
 #' @export
-sc.deg.cohort <- function(seurat_obj,
+sc.deg.mast <- function(seurat_obj,
                           ident.1,
                           ident.2,
                           celltype_col = "detailed.celltypes",
@@ -123,3 +123,4 @@ sc.deg.cohort <- function(seurat_obj,
 
   return(DEG_final_df)
 }
+
