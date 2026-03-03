@@ -1,38 +1,31 @@
-#' @title Custom Polar Volcano Plot with Radial Labels
-#' @description Generates a high-quality polar volcano plot for single-cell DE results.
-#'              Features outward-facing up-regulation, inward-facing down-regulation, 
-#'              and radial cell type labeling in the center hole.
+#' @title Custom Polar Volcano Plot with Radial Labels and log2FC Scale
+#' @description Generates a polar volcano plot with manual grid lines to indicate log2FC magnitude.
 #' 
-#' @param diffData Dataframe of DE results (must contain 'genes', 'celltype', 'avg_log2FC', 'p_val')
-#' @param target_genes Character vector of genes to highlight (e.g., LAIR1, VSIR).
+#' @param diffData Dataframe of DE results.
+#' @param target_genes Character vector of genes to highlight.
 #' @param color.use Named character vector of colors for cell types.
-#' @param log2FC_cut Numeric. log2FC threshold for background bars. Default is 0.25.
-#' @param pval_cut Numeric. p-value threshold for background bars. Default is 0.05.
-#' @param hole_size Numeric. Controls the radius of the center hole for labels. Default is 5.0.
-#' @param dot_size Numeric. Size of the highlighted target gene points. Default is 5.
-#' @return A ggplot object.
-#' @author Hyundong Yoon
-#' @export
+#' @param grid_breaks Numeric vector. Values to draw scale circles (e.g., c(-2, 2, 4)).
+#' @param hole_size Numeric. Controls the center hole radius. Default is 5.5.
+#' @param dot_size Numeric. Size of the target gene points. Default is 3.
 sc.Polar.Volcano <- function(diffData, 
                              target_genes, 
                              color.use, 
+                             grid_breaks = c(-2, 2, 4, 6),
                              log2FC_cut = 0.25, 
                              pval_cut = 0.05,
-                             hole_size = 5.0,
-                             dot_size = 5) {
+                             hole_size = 5.5,
+                             dot_size = 3) {
   
   require(dplyr)
   require(ggplot2)
   require(ggrepel)
   
-  # 1. Data Processing and Mapping
-  # Rename columns and factorize cluster levels to match the provided color palette order
+  # 1. Data Processing
   plot_data <- diffData %>%
     rename(gene = genes, cluster = celltype) %>%
     mutate(cluster = factor(cluster, levels = names(color.use)))
   
-  # 2. Calculate Background Bar Ranges
-  # Define the range for the grey background bars based on significant genes
+  # 2. Background Bar Range Calculation
   sig_data <- plot_data %>%
     filter(abs(avg_log2FC) >= log2FC_cut & p_val < pval_cut)
   
@@ -45,65 +38,67 @@ sc.Polar.Volcano <- function(diffData,
     )
   
   # 3. Radial Label Calculation
-  # Calculate rotation angles and horizontal justification for labels in polar coordinates
   label_data <- back_data %>%
     mutate(
       id = as.numeric(cluster),
       n_tot = n(),
-      # Convert position to degrees for rotation
       angle_base = 90 - 360 * (id - 0.5) / n_tot,
-      # Flip text on the left side of the plot to keep it readable (not upside down)
       angle = ifelse(angle_base < -90, angle_base + 180, angle_base),
       hjust = ifelse(angle_base < -90, 0, 1),
-      # Position labels slightly inward from the minimum log2FC value
-      y_pos = min_val - 0.3 
+      y_pos = min_val - 0.5 
     )
   
   # 4. Filter Target Gene Data
-  # Isolate the specific genes requested for dot highlighting
   target_data <- plot_data %>% filter(gene %in% target_genes)
   
-  # 5. Build Plot Layers
+  # 5. Build Plot
   p <- ggplot() +
-    # Background Bars: Representing the spread of DE genes for each cluster
+    # Background Bars
     geom_col(data = back_data, aes(x = cluster, y = max_val), fill = "grey93", width = 0.9) +
     geom_col(data = back_data, aes(x = cluster, y = min_val), fill = "grey93", width = 0.9) +
     
-    # Baseline: Indicates log2FC = 0
+    # [NEW] Manual Grid Lines (Concentric Circles)
+    geom_hline(yintercept = grid_breaks, color = "grey80", linetype = "dashed", linewidth = 0.3) +
+    
+    # [NEW] Scale Labels (avg_log2FC numbers)
+    # Placed at the position of the first cluster for consistency
+    annotate("text", x = 0.5, y = grid_breaks, label = grid_breaks, 
+             size = 2.5, color = "grey40", fontface = "italic") +
+    
+    # Baseline (log2FC = 0)
     geom_hline(yintercept = 0, color = "white", linewidth = 1.2) +
     
-    # Center Tiles: Colored band representing each cell type
+    # Center Cluster Tiles
     geom_tile(data = back_data, aes(x = cluster, y = 0, fill = cluster),
               height = 0.6, color = "black", alpha = 0.6, show.legend = FALSE) +
     
-    # Radial Labels: Cell type names positioned in the center hole
+    # Radial Cell Type Labels
     geom_text(data = label_data, 
               aes(x = cluster, y = y_pos, label = cluster, angle = angle, hjust = hjust),
               size = 2.8, color = "black") +
     
-    # Target Points: Large colored dots for LAIR1 and VSIR
+    # Target Gene Points
     geom_point(data = target_data, aes(x = cluster, y = avg_log2FC, color = cluster),
                size = dot_size) +
     
-    # Gene Labels: Non-overlapping text labels for target genes
+    # Target Gene Text Labels
     ggrepel::geom_text_repel(data = target_data,
                              aes(x = cluster, y = avg_log2FC, label = gene),
-                             size = dot_size, fontface = "bold.italic",
-                             box.padding = 1, min.segment.length = 0) +
+                             size = 4, fontface = "bold.italic",
+                             box.padding = 0.8, min.segment.length = 0) +
     
-    # Mapping custom colors to scales
+    # Color Scales
     scale_fill_manual(values = color.use) +
     scale_color_manual(values = color.use) +
     
-    # 6. Coordinate and Theme Settings
-    # Adjust y-axis limits to expand the center hole for labels
+    # Coordinates & Theme
     scale_y_continuous(limits = c(min(back_data$min_val) - hole_size, max(back_data$max_val) + 1),
                        expand = c(0, 0)) +
     coord_polar(clip = "off") +
-    theme_void() + # Clean background for publication
+    theme_void() +
     theme(
       plot.margin = margin(10, 10, 10, 10),
-      legend.position = "none" # Labels are directly on plot, so legend is redundant
+      legend.position = "none"
     )
   
   return(p)
