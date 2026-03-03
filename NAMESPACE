@@ -1,6 +1,7 @@
 # --- Functions Export ---
 export(sc.CompactSeurat)
 export(sc.deg.mast)
+export(sc.Polar.Volcano)
 export(sc.pseudobulk.DE)
 export(sc.celltype.cor)
 export(sc.eCDF)
