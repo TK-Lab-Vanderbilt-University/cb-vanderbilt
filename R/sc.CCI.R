@@ -1,28 +1,46 @@
-#' Build and Extend Ligand-Receptor Database for MultiNicheNet
+#' Build and Extend Ligand-Receptor Database for MultiNicheNet (Local Version)
 #'
+#' @description
+#' This function loads NicheNet databases from a local directory and integrates 
+#' user-defined ligand-receptor pairs.
+#'
+#' @param ref A character string indicating the local directory path where RDS files are stored.
+#' @param organism A character string indicating the organism: "human" (default) or "mouse".
+#' @param custom_ligands A character vector of custom ligand symbols to be added.
+#' @param custom_receptor A character string of the custom receptor symbol.
+#'
+#' @return A list containing the integrated `lr_network` and `ligand_target_matrix`.
+#' 
 #' @export
 #' @importFrom magrittr %>%
 #' @importFrom dplyr mutate distinct bind_rows filter
 #' @importFrom MultiNicheNet convert_alias_to_symbols convert_human_to_mouse_symbols
-build_custom_lr_db <- function(organism = "human", 
+build_custom_lr_db <- function(ref,
+                               organism = "human", 
                                custom_ligands = c("SELPLG", "LGALS9", "MMP13", "LRIG1", "SDC2", "VSIG8", "IGSF11"), 
                                custom_receptor = "VSIR") {
   
-  options(timeout = 120)
-  
+  # Ensure the path ends with a slash
+  if (!grepl("/$", ref)) {
+    ref <- paste0(ref, "/")
+  }
+
   if (organism == "human") {
-    lr_network_all <- readRDS(url("https://zenodo.org/record/10229222/files/lr_network_human_allInfo_30112033.rds")) %>% 
+    # Load from local directory
+    lr_network_all <- readRDS(paste0(ref, "lr_network_human_allInfo_30112033.rds")) %>% 
       mutate(ligand = convert_alias_to_symbols(ligand, organism = organism), 
              receptor = convert_alias_to_symbols(receptor, organism = organism))
-    ligand_target_matrix <- readRDS(url("https://zenodo.org/record/7074291/files/ligand_target_matrix_nsga2r_final.rds"))
+    ligand_target_matrix <- readRDS(paste0(ref, "ligand_target_matrix_nsga2r_final.rds"))
     
     cur_ligands <- make.names(custom_ligands)
     cur_receptor <- make.names(custom_receptor)
+    
   } else if (organism == "mouse") {
-    lr_network_all <- readRDS(url("https://zenodo.org/record/10229222/files/lr_network_mouse_allInfo_30112033.rds")) %>% 
+    # Load from local directory
+    lr_network_all <- readRDS(paste0(ref, "lr_network_mouse_allInfo_30112033.rds")) %>% 
       mutate(ligand = convert_alias_to_symbols(ligand, organism = organism), 
              receptor = convert_alias_to_symbols(receptor, organism = organism))
-    ligand_target_matrix <- readRDS(url("https://zenodo.org/record/7074291/files/ligand_target_matrix_nsga2r_final_mouse.rds"))
+    ligand_target_matrix <- readRDS(paste0(ref, "ligand_target_matrix_nsga2r_final_mouse.rds"))
     
     cur_ligands <- convert_human_to_mouse_symbols(custom_ligands) %>% make.names()
     cur_receptor <- convert_human_to_mouse_symbols(custom_receptor) %>% make.names()
@@ -31,14 +49,17 @@ build_custom_lr_db <- function(organism = "human",
   lr_network_all <- lr_network_all %>% mutate(ligand = make.names(ligand), receptor = make.names(receptor))
   lr_network <- lr_network_all %>% distinct(ligand, receptor)
   
+  # Add custom pairs
   custom_lr_pairs <- data.frame(ligand = cur_ligands, receptor = cur_receptor)
   lr_network <- bind_rows(lr_network, custom_lr_pairs) %>% distinct()
   
+  # Standardize symbols in matrix
   colnames(ligand_target_matrix) <- colnames(ligand_target_matrix) %>% 
     convert_alias_to_symbols(organism = organism) %>% make.names()
   rownames(ligand_target_matrix) <- rownames(ligand_target_matrix) %>% 
     convert_alias_to_symbols(organism = organism) %>% make.names()
   
+  # Handle missing custom ligands
   missing_ligands <- setdiff(cur_ligands, colnames(ligand_target_matrix))
   if (length(missing_ligands) > 0) {
     for (l in missing_ligands) {
@@ -76,7 +97,7 @@ prepare_sce_object <- function(seurat_obj, organism = "human") {
   return(sce)
 }
 
-#' Execute the Full MultiNicheNet Analysis Pipeline with Enhanced Parameters
+#' Execute the Full MultiNicheNet Analysis Pipeline
 #'
 #' @export
 #' @import MultiNicheNet
@@ -235,4 +256,3 @@ run_multinichenet_pipeline <- function(sce,
   if(verbose) message("Analysis Complete.")
   return(make_lite_output(multinichenet_output))
 }
-
