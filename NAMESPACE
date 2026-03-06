@@ -10,12 +10,21 @@ export(sc.expr.prop.bar)
 export(sc.expr.density.split)
 export(sc.RunAUCell)
 export(sc.PlotAUCell)
+export(build_custom_lr_db)
+export(prepare_sce_object)
+export(run_multinichenet_pipeline)
 
 # --- Primary Frameworks ---
 import(Seurat)
 import(SeuratObject)
 import(MAST)
 import(edgeR)
+import(dplyr)
+import(magrittr)
+import(Seurat)
+import(SingleCellExperiment)
+import(SummarizedExperiment)
+importFrom(tibble, tibble)
 
 # --- Data Structures & Management ---
 import(SingleCellExperiment)
