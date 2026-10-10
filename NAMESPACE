@@ -13,7 +13,7 @@ export(sc.PlotAUCell)
 export(build_custom_lr_db)
 export(prepare_sce_object)
 export(run_multinichenet_pipeline)
-
+export(sc.gene.celltype.cor)
 # --- Primary Frameworks ---
 import(Seurat)
 import(SeuratObject)
